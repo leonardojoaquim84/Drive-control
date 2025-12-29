@@ -2,10 +2,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Vehicle, FuelEntry } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
 export const getFuelInsights = async (vehicle: Vehicle) => {
   if (vehicle.entries.length === 0) return "Adicione alguns abastecimentos para receber insights da IA.";
+
+  // Initialize inside the function or ensure process.env.API_KEY is available
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const dataSummary = vehicle.entries.map(e => ({
     date: e.date,
@@ -22,13 +23,12 @@ export const getFuelInsights = async (vehicle: Vehicle) => {
       Forneça 3 dicas curtas e práticas sobre eficiência de combustível ou qual combustível está compensando mais (Álcool vs Gasolina) baseado nos dados. Responda em Português do Brasil.`,
       config: {
         temperature: 0.7,
-        maxOutputTokens: 300,
       }
     });
 
     return response.text || "Não foi possível gerar insights no momento.";
   } catch (error) {
     console.error("Gemini Error:", error);
-    return "Erro ao carregar insights inteligentes.";
+    return "Conecte-se à internet para carregar insights inteligentes.";
   }
 };

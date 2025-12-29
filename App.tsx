@@ -1,25 +1,167 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Vehicle, FuelEntry, AppState } from './types';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Vehicle, FuelEntry, AppState, User, UserAccount } from './types';
 import FuelingForm from './components/FuelingForm';
 import StatsDashboard from './components/StatsDashboard';
 import { getFuelInsights } from './services/geminiService';
 
+const PRESET_COLORS = [
+  { name: 'Azul Real', hex: '#2563eb' },
+  { name: 'Azul Céu', hex: '#0ea5e9' },
+  { name: 'Índigo', hex: '#4f46e5' },
+  { name: 'Violeta', hex: '#7c3aed' },
+  { name: 'Roxo', hex: '#a855f7' },
+  { name: 'Fúcsia', hex: '#d946ef' },
+  { name: 'Rosa', hex: '#ec4899' },
+  { name: 'Rosa Choque', hex: '#f43f5e' },
+  { name: 'Vermelho', hex: '#ef4444' },
+  { name: 'Laranja', hex: '#f97316' },
+  { name: 'Âmbar', hex: '#f59e0b' },
+  { name: 'Amarelo', hex: '#eab308' },
+  { name: 'Lima', hex: '#84cc16' },
+  { name: 'Verde', hex: '#22c55e' },
+  { name: 'Esmeralda', hex: '#10b981' },
+  { name: 'Teal', hex: '#14b8a6' },
+  { name: 'Ciano', hex: '#06b6d4' },
+  { name: 'Slate', hex: '#64748b' },
+  { name: 'Grafite', hex: '#374151' },
+  { name: 'Preto', hex: '#000000' },
+];
+
 const App: React.FC = () => {
-  const [state, setState] = useState<AppState>(() => {
-    const saved = localStorage.getItem('fueltrack_state');
-    return saved ? JSON.parse(saved) : { vehicles: [], activeVehicleId: null };
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('drivecontrol_session');
+    return saved ? JSON.parse(saved) : null;
   });
 
+  const [state, setState] = useState<AppState>({ vehicles: [], activeVehicleId: null });
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
+  const isHydrated = useRef<string | null>(null);
+
+  const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+
   const [isAddingVehicle, setIsAddingVehicle] = useState(false);
+  const [isEditingVehicle, setIsEditingVehicle] = useState(false);
   const [isAddingFuel, setIsAddingFuel] = useState(false);
+  
   const [newVehicleName, setNewVehicleName] = useState('');
+  const [newVehicleColor, setNewVehicleColor] = useState(PRESET_COLORS[0].hex);
+  const [editName, setEditName] = useState('');
+  const [editPlate, setEditPlate] = useState('');
+  const [editColor, setEditColor] = useState('');
+  const [editPhoto, setEditPhoto] = useState<string | undefined>(undefined);
+
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isInsightLoading, setIsInsightLoading] = useState(false);
 
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileName, setProfileName] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState<string | undefined>(undefined);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const profileFileInputRef = useRef<HTMLInputElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    localStorage.setItem('fueltrack_state', JSON.stringify(state));
-  }, [state]);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      setIsLoadingProfile(true);
+      isHydrated.current = null;
+      const dbKey = `dc_db_${currentUser.username.toLowerCase()}`;
+      const savedData = localStorage.getItem(dbKey);
+      
+      const timer = setTimeout(() => {
+        if (savedData) {
+          try {
+            const parsed = JSON.parse(savedData);
+            setState(parsed);
+          } catch (e) {
+            setState({ vehicles: [], activeVehicleId: null });
+          }
+        } else {
+          setState({ vehicles: [], activeVehicleId: null });
+        }
+        setIsLoadingProfile(false);
+        isHydrated.current = currentUser.username;
+        localStorage.setItem('drivecontrol_session', JSON.stringify(currentUser));
+      }, 600);
+      return () => clearTimeout(timer);
+    } else {
+      isHydrated.current = null;
+      setState({ vehicles: [], activeVehicleId: null });
+    }
+  }, [currentUser?.username]);
+
+  useEffect(() => {
+    if (currentUser && isHydrated.current === currentUser.username && !isLoadingProfile) {
+      const dbKey = `dc_db_${currentUser.username.toLowerCase()}`;
+      localStorage.setItem(dbKey, JSON.stringify(state));
+    }
+  }, [state, currentUser, isLoadingProfile]);
+
+  const handleAuth = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    const accounts: UserAccount[] = JSON.parse(localStorage.getItem('drivecontrol_accounts') || '[]');
+    const normalizedUsername = authUsername.trim();
+    if (!normalizedUsername) return;
+
+    const existingAccount = accounts.find(acc => acc.username.toLowerCase() === normalizedUsername.toLowerCase());
+
+    if (isAuthMode === 'register') {
+      if (existingAccount) {
+        setAuthError('Perfil já existe.');
+        return;
+      }
+      const newAccount: UserAccount = { username: normalizedUsername, password: '' };
+      accounts.push(newAccount);
+      localStorage.setItem('drivecontrol_accounts', JSON.stringify(accounts));
+      setCurrentUser({ username: normalizedUsername });
+    } else {
+      if (existingAccount) {
+        setCurrentUser({ username: existingAccount.username, photo: existingAccount.photo });
+      } else {
+        setAuthError('Usuário não encontrado.');
+      }
+    }
+  };
+
+  const handleLogout = () => {
+    if (confirm('Sair do perfil?')) {
+      isHydrated.current = null;
+      localStorage.removeItem('drivecontrol_session');
+      setCurrentUser(null);
+    }
+  };
+
+  const handleSaveProfile = () => {
+    if (!currentUser || !profileName.trim()) return;
+    const accounts: UserAccount[] = JSON.parse(localStorage.getItem('drivecontrol_accounts') || '[]');
+    const updatedAccounts = accounts.map(acc => {
+      if (acc.username.toLowerCase() === currentUser.username.toLowerCase()) {
+        return { ...acc, username: profileName, photo: profilePhoto };
+      }
+      return acc;
+    });
+    localStorage.setItem('drivecontrol_accounts', JSON.stringify(updatedAccounts));
+    const updatedUser = { username: profileName, photo: profilePhoto };
+    setCurrentUser(updatedUser);
+    localStorage.setItem('drivecontrol_session', JSON.stringify(updatedUser));
+    setIsEditingProfile(false);
+  };
 
   const activeVehicle = useMemo(() => 
     state.vehicles.find(v => v.id === state.activeVehicleId),
@@ -27,13 +169,15 @@ const App: React.FC = () => {
   );
 
   useEffect(() => {
-    if (activeVehicle) {
+    if (activeVehicle && activeVehicle.entries.length > 0) {
       handleGetInsights();
+    } else {
+      setAiInsight('');
     }
   }, [state.activeVehicleId]);
 
   const handleGetInsights = async () => {
-    if (!activeVehicle) return;
+    if (!activeVehicle || activeVehicle.entries.length === 0) return;
     setIsInsightLoading(true);
     const insight = await getFuelInsights(activeVehicle);
     setAiInsight(insight);
@@ -47,6 +191,7 @@ const App: React.FC = () => {
       name: newVehicleName,
       model: '',
       plate: '',
+      color: newVehicleColor,
       entries: [],
     };
     setState(prev => ({
@@ -58,16 +203,27 @@ const App: React.FC = () => {
     setIsAddingVehicle(false);
   };
 
+  const saveEditVehicle = () => {
+    if (!state.activeVehicleId) return;
+    setState(prev => ({
+      ...prev,
+      vehicles: prev.vehicles.map(v => 
+        v.id === state.activeVehicleId 
+          ? { ...v, name: editName, plate: editPlate, photo: editPhoto, color: editColor } 
+          : v
+      )
+    }));
+    setIsEditingVehicle(false);
+  };
+
   const addFuelEntry = (data: Omit<FuelEntry, 'id' | 'pricePerLiter' | 'efficiency'>) => {
     if (!state.activeVehicleId) return;
-
     const newEntry: FuelEntry = {
       ...data,
       id: Date.now().toString(),
       pricePerLiter: data.value / data.liters,
       efficiency: data.kmPartial / data.liters,
     };
-
     setState(prev => ({
       ...prev,
       vehicles: prev.vehicles.map(v => 
@@ -80,243 +236,266 @@ const App: React.FC = () => {
   };
 
   const removeVehicle = (id: string) => {
-    if (confirm('Deseja realmente remover este veículo?')) {
-      setState(prev => ({
-        ...prev,
-        vehicles: prev.vehicles.filter(v => v.id !== id),
-        activeVehicleId: prev.activeVehicleId === id ? (prev.vehicles[0]?.id || null) : prev.activeVehicleId
-      }));
+    if (confirm(`Excluir aba do veículo?`)) {
+      setAiInsight('');
+      setState(prev => {
+        const remaining = prev.vehicles.filter(v => v.id !== id);
+        return {
+          ...prev,
+          vehicles: remaining,
+          activeVehicleId: remaining.length > 0 ? remaining[0].id : null
+        };
+      });
     }
   };
 
-  return (
-    <div className="max-w-6xl mx-auto px-4 py-8 pb-24">
-      {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
-        <div>
-          <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">DriveControl <span className="text-blue-600">Pro</span></h1>
-          <p className="text-gray-500 font-medium">controle total dos seus consumos e gastos</p>
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setEditPhoto(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleProfilePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setProfilePhoto(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl p-10">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl text-white text-2xl mb-4 shadow-lg shadow-blue-100">
+              <i className="fas fa-car-side"></i>
+            </div>
+            <h1 className="text-2xl font-black text-gray-900">DriveControl <span className="text-blue-600">Pro</span></h1>
+          </div>
+          <form onSubmit={handleAuth} className="space-y-4">
+            <input
+              type="text"
+              required
+              value={authUsername}
+              onChange={(e) => setAuthUsername(e.target.value)}
+              className="w-full px-6 py-4 bg-gray-50 border border-gray-100 rounded-2xl font-bold"
+              placeholder="Nome de usuário"
+            />
+            {authError && <p className="text-red-500 text-xs font-bold">{authError}</p>}
+            <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black">
+              {isAuthMode === 'login' ? 'Entrar' : 'Cadastrar'}
+            </button>
+            <button type="button" onClick={() => setIsAuthMode(isAuthMode === 'login' ? 'register' : 'login')} className="w-full text-sm font-bold text-blue-600">
+              {isAuthMode === 'login' ? 'Criar perfil' : 'Já tenho perfil'}
+            </button>
+          </form>
         </div>
-        <button 
-          onClick={() => setIsAddingVehicle(true)}
-          className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all hover:scale-[1.02]"
-        >
-          <i className="fas fa-plus-circle"></i> Novo Veículo
-        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      {/* Header aligned with mockup */}
+      <header className="mb-10">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white text-xl shadow-lg shadow-blue-100">
+            <i className="fas fa-car-side"></i>
+          </div>
+          <div>
+            <h1 className="text-2xl font-black text-gray-900 leading-tight">DriveControl <span className="text-blue-600">Pro</span></h1>
+            <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">Painel de {currentUser.username}</p>
+          </div>
+        </div>
+
+        {/* User profile dropdown below name */}
+        <div className="relative inline-block mb-8" ref={userMenuRef}>
+          <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center gap-3 p-1.5 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors">
+            <div className="w-8 h-8 bg-white rounded-full overflow-hidden border-2 border-white shadow-sm">
+              {currentUser.photo ? <img src={currentUser.photo} className="w-full h-full object-cover" /> : <i className="fas fa-user text-gray-300 mt-2"></i>}
+            </div>
+            <i className="fas fa-chevron-down text-[8px] text-gray-400 mr-1"></i>
+          </button>
+          {isUserMenuOpen && (
+            <div className="absolute left-0 mt-2 w-48 bg-white rounded-2xl shadow-xl border border-gray-100 z-50">
+              <button onClick={() => { setIsEditingProfile(true); setIsUserMenuOpen(false); setProfileName(currentUser.username); setProfilePhoto(currentUser.photo); }} className="w-full text-left px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                <i className="fas fa-user-circle text-blue-500"></i> Perfil
+              </button>
+              <button onClick={handleLogout} className="w-full text-left px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-50 flex items-center gap-2 border-t border-gray-50">
+                <i className="fas fa-sign-out-alt"></i> Sair
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
-      {/* Tabs Navigation */}
-      <div className="flex overflow-x-auto no-scrollbar gap-2 mb-8 pb-2 border-b border-gray-200">
+      {/* Tabs */}
+      <div className="flex items-center gap-2 mb-10 overflow-x-auto no-scrollbar pb-2">
         {state.vehicles.map(vehicle => (
           <button
             key={vehicle.id}
             onClick={() => setState(prev => ({ ...prev, activeVehicleId: vehicle.id }))}
-            className={`flex-shrink-0 px-6 py-3 rounded-t-2xl font-semibold transition-all flex items-center gap-3 ${
+            className={`flex-shrink-0 px-6 py-3 rounded-2xl font-black text-sm transition-all flex items-center gap-2 ${
               state.activeVehicleId === vehicle.id 
-                ? 'bg-white text-blue-600 border-t border-x border-gray-200 -mb-[1px] shadow-[0_-4px_10px_-5px_rgba(0,0,0,0.05)]' 
-                : 'text-gray-400 hover:text-gray-600'
+              ? 'bg-black text-white shadow-lg' 
+              : 'bg-blue-50 text-blue-600'
             }`}
           >
-            <i className="fas fa-car-side"></i>
+            <i className="fas fa-car text-xs"></i>
             {vehicle.name}
           </button>
         ))}
-        {state.vehicles.length === 0 && (
-          <p className="text-gray-400 italic py-2">Nenhum veículo cadastrado.</p>
-        )}
+        <button
+          onClick={() => setIsAddingVehicle(true)}
+          className="flex-shrink-0 px-6 py-3 font-black text-sm text-blue-600 bg-blue-50 rounded-2xl flex items-center gap-2 hover:bg-blue-100"
+        >
+          <i className="fas fa-plus-circle"></i>
+          Novo Veículo
+        </button>
       </div>
 
       {activeVehicle ? (
-        <main className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in duration-500">
-          {/* Main Content Area */}
-          <div className="lg:col-span-2 space-y-8">
-            <StatsDashboard vehicle={activeVehicle} />
-
-            {/* AI Insights Card */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-3xl border border-blue-100 shadow-sm">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200">
-                  <i className="fas fa-robot"></i>
-                </div>
-                <div>
-                  <h3 className="font-bold text-gray-900">Insights da IA</h3>
-                  <p className="text-xs text-blue-600 font-medium uppercase tracking-wider">Análise de Performance</p>
-                </div>
-                <button 
-                  onClick={handleGetInsights} 
-                  disabled={isInsightLoading}
-                  className="ml-auto text-blue-600 hover:text-blue-800 transition-colors"
-                >
-                  <i className={`fas fa-sync-alt ${isInsightLoading ? 'animate-spin' : ''}`}></i>
-                </button>
+        <div className="space-y-10">
+          {/* Main Vehicle Card - Image and Actions as shown in mockup */}
+          <div className="bg-white rounded-[3rem] p-8 lg:p-12 shadow-sm border border-gray-50 relative overflow-hidden">
+            {/* Subtle background circle element like in image */}
+            <div className="absolute top-0 right-0 w-64 h-64 bg-gray-50 rounded-full -mr-32 -mt-32 -z-0"></div>
+            
+            <div className="relative z-10 flex flex-col items-start gap-8">
+              {/* Circular vehicle photo */}
+              <div className="w-32 h-32 rounded-full overflow-hidden border-8 border-gray-50 bg-gray-100 flex items-center justify-center shadow-inner">
+                {activeVehicle.photo ? (
+                  <img src={activeVehicle.photo} className="w-full h-full object-cover" />
+                ) : (
+                  <i className="fas fa-car-side text-4xl text-gray-200"></i>
+                )}
               </div>
-              <div className="text-gray-700 leading-relaxed text-sm md:text-base whitespace-pre-line">
-                {isInsightLoading ? (
-                  <div className="flex flex-col gap-2">
-                    <div className="h-4 bg-blue-100 rounded animate-pulse w-full"></div>
-                    <div className="h-4 bg-blue-100 rounded animate-pulse w-3/4"></div>
+
+              <div>
+                <div className="flex items-center gap-4 mb-6">
+                  <h2 className="text-5xl font-black text-gray-900 tracking-tighter">{activeVehicle.name}</h2>
+                  <div className="bg-black text-white px-4 py-1.5 rounded-full text-[12px] font-black uppercase tracking-widest">
+                    {activeVehicle.plate || 'AAA 222'}
                   </div>
-                ) : aiInsight}
-              </div>
-            </div>
+                </div>
 
-            {/* Recent History */}
-            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-              <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-                <h3 className="text-xl font-bold text-gray-800">Histórico Recente</h3>
+                <div className="flex flex-wrap items-center gap-4 mb-6">
+                  <button onClick={() => setIsAddingFuel(true)} className="bg-gray-900 text-white px-8 py-4 rounded-2xl font-black flex items-center gap-3 shadow-xl hover:bg-black transition-all active:scale-95">
+                    <i className="fas fa-gas-pump"></i> Novo Abastecimento
+                  </button>
+                  <button onClick={() => { setIsEditingVehicle(true); setEditName(activeVehicle.name); setEditPlate(activeVehicle.plate); setEditColor(activeVehicle.color); setEditPhoto(activeVehicle.photo); }} className="bg-white text-gray-600 px-6 py-4 rounded-2xl font-black border border-gray-200 flex items-center gap-3 hover:bg-gray-50">
+                    <i className="fas fa-sliders-h"></i> Configurar
+                  </button>
+                </div>
+
+                {/* Specific removal button styling from mockup */}
+                <div className="inline-block border border-blue-400 px-3 py-1.5 rounded-lg">
+                  <button onClick={() => removeVehicle(activeVehicle.id)} className="text-red-500 text-xs font-bold hover:text-red-600">
+                    Remover Veículo
+                  </button>
+                </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50 text-gray-500 text-xs font-bold uppercase tracking-wider">
-                    <tr>
-                      <th className="px-6 py-4 text-left">Data</th>
-                      <th className="px-6 py-4 text-left">Combustível</th>
-                      <th className="px-6 py-4 text-left">Média</th>
-                      <th className="px-6 py-4 text-left">R$/L</th>
-                      <th className="px-6 py-4 text-right">Valor</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {activeVehicle.entries.map(entry => (
-                      <tr key={entry.id} className="hover:bg-gray-50 transition-colors group">
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                          {new Date(entry.date).toLocaleDateString('pt-BR')}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                            entry.fuelType === 'Gasolina' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
-                          }`}>
-                            {entry.fuelType}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm font-bold text-blue-600">
-                          {entry.efficiency.toFixed(2)} km/l
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-500">
-                          R$ {entry.pricePerLiter.toFixed(2)}
-                        </td>
-                        <td className="px-6 py-4 text-right text-sm font-bold text-gray-900">
-                          R$ {entry.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    ))}
-                    {activeVehicle.entries.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="px-6 py-12 text-center text-gray-400 italic">
-                          Nenhum abastecimento registrado ainda.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+
+              {/* AI Drive Insight Box */}
+              <div className="w-full bg-blue-50/50 rounded-[2.5rem] p-8 border border-blue-50">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white text-xs">
+                    <i className="fas fa-robot"></i>
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-600">AI Drive Insight</span>
+                </div>
+                {isInsightLoading ? (
+                  <p className="text-sm text-gray-400 font-bold italic animate-pulse">Analisando seus dados...</p>
+                ) : (
+                  <p className="text-sm text-gray-600 leading-relaxed font-bold italic">
+                    "{aiInsight || "Comece a abastecer para que eu possa analisar sua eficiência e te dar as melhores dicas!"}"
+                  </p>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Sidebar Area */}
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm text-center">
-              <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400 text-2xl">
-                <i className="fas fa-car-side"></i>
-              </div>
-              <h2 className="text-xl font-bold text-gray-900">{activeVehicle.name}</h2>
-              <p className="text-gray-500 text-sm mb-6">Informações do Veículo</p>
-              
-              <div className="space-y-3 mb-6">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400 font-medium">Abastecimentos</span>
-                  <span className="text-gray-900 font-bold">{activeVehicle.entries.length}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400 font-medium">Distância Estimada</span>
-                  <span className="text-gray-900 font-bold">
-                    {activeVehicle.entries.reduce((acc, curr) => acc + curr.kmPartial, 0)} km
-                  </span>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => removeVehicle(activeVehicle.id)}
-                className="w-full py-3 text-red-500 text-sm font-semibold hover:bg-red-50 rounded-xl transition-colors"
-              >
-                Remover Veículo
-              </button>
-            </div>
-
-            <button 
-              onClick={() => setIsAddingFuel(true)}
-              className="w-full bg-gray-900 text-white py-4 rounded-3xl font-bold shadow-xl hover:bg-black transition-all transform hover:-translate-y-1"
-            >
-              <i className="fas fa-gas-pump mr-2"></i> Novo Abastecimento
-            </button>
-          </div>
-        </main>
+          {/* Statistics Grid */}
+          <StatsDashboard vehicle={activeVehicle} />
+        </div>
       ) : (
-        <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
-          <div className="relative inline-block mb-6">
-             <i className="fas fa-car-side text-6xl text-gray-200"></i>
-             <i className="fas fa-plus absolute -top-2 -right-2 text-xl text-gray-300 bg-white rounded-full p-1 border border-gray-100"></i>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-800">Sem veículos ativos</h2>
-          <p className="text-gray-500 mt-2">Adicione seu primeiro veículo para começar o monitoramento.</p>
-          <button 
-            onClick={() => setIsAddingVehicle(true)}
-            className="mt-6 bg-blue-600 text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95"
-          >
-            Adicionar Veículo
-          </button>
+        <div className="bg-white rounded-[3rem] p-20 text-center border-2 border-dashed border-gray-100">
+          <i className="fas fa-car text-6xl text-gray-200 mb-6"></i>
+          <h2 className="text-2xl font-black text-gray-900 mb-4">Garagem vazia</h2>
+          <button onClick={() => setIsAddingVehicle(true)} className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black">Adicionar Veículo</button>
         </div>
       )}
 
-      {/* Add Vehicle Modal */}
+      {/* Modals */}
       {isAddingVehicle && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">Novo Veículo</h3>
-            <p className="text-gray-500 mb-6">Dê um nome ou apelido ao seu veículo.</p>
-            <input
-              type="text"
-              value={newVehicleName}
-              onChange={(e) => setNewVehicleName(e.target.value)}
-              placeholder="Ex: Renegade Azul"
-              className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none mb-6"
-              autoFocus
-            />
-            <div className="flex gap-3">
-              <button 
-                onClick={addVehicle}
-                className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors"
-              >
-                Adicionar
-              </button>
-              <button 
-                onClick={() => setIsAddingVehicle(false)}
-                className="flex-1 bg-gray-100 text-gray-600 py-4 rounded-2xl font-bold hover:bg-gray-200 transition-colors"
-              >
-                Cancelar
-              </button>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white p-8 rounded-[2.5rem] max-w-sm w-full shadow-2xl">
+            <h3 className="text-2xl font-black mb-6">Novo Veículo</h3>
+            <div className="space-y-4">
+              <input type="text" value={newVehicleName} onChange={e => setNewVehicleName(e.target.value)} placeholder="Nome do veículo" className="w-full p-4 bg-gray-50 rounded-2xl font-bold" />
+              <div className="flex gap-4 pt-4">
+                <button onClick={addVehicle} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black">Criar</button>
+                <button onClick={() => setIsAddingVehicle(false)} className="flex-1 bg-gray-100 text-gray-500 py-4 rounded-2xl font-bold">Voltar</button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Add Fuel Entry Modal */}
       {isAddingFuel && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl animate-in slide-in-from-bottom-10 duration-300">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="max-w-xl w-full">
             <FuelingForm onSave={addFuelEntry} onCancel={() => setIsAddingFuel(false)} />
           </div>
         </div>
       )}
 
-      {/* Floating Action Button for Mobile */}
-      {activeVehicle && !isAddingFuel && (
-        <button 
-          onClick={() => setIsAddingFuel(true)}
-          className="fixed bottom-8 right-8 w-16 h-16 bg-blue-600 text-white rounded-full shadow-2xl shadow-blue-400 flex items-center justify-center text-2xl lg:hidden hover:scale-110 active:scale-95 transition-all z-40"
-        >
-          <i className="fas fa-gas-pump"></i>
-        </button>
+      {isEditingVehicle && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-md w-full animate-in zoom-in-95">
+            <h3 className="text-3xl font-black mb-8">Editar Veículo</h3>
+            <div className="space-y-6">
+              <div className="flex justify-center mb-4">
+                <div className="w-32 h-32 bg-gray-50 rounded-full border-4 border-white shadow-xl flex items-center justify-center overflow-hidden relative cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                  {editPhoto ? <img src={editPhoto} className="w-full h-full object-cover" /> : <i className="fas fa-camera text-3xl text-gray-200"></i>}
+                </div>
+                <input type="file" ref={fileInputRef} onChange={handlePhotoChange} accept="image/*" className="hidden" />
+              </div>
+              <input type="text" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Nome" className="w-full p-4 bg-gray-50 rounded-2xl font-bold" />
+              <input type="text" value={editPlate} onChange={e => setEditPlate(e.target.value.toUpperCase())} placeholder="Placa (Ex: ABC-1234)" className="w-full p-4 bg-gray-50 rounded-2xl font-black uppercase" />
+              <div className="flex gap-4 pt-4">
+                <button onClick={saveEditVehicle} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black">Salvar</button>
+                <button onClick={() => setIsEditingVehicle(false)} className="flex-1 bg-gray-100 text-gray-500 py-4 rounded-2xl font-bold">Cancelar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isEditingProfile && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-sm w-full">
+            <h3 className="text-2xl font-black mb-8">Editar Perfil</h3>
+            <div className="space-y-6">
+              <div className="flex justify-center mb-4">
+                <div className="w-24 h-24 bg-gray-50 rounded-full border-4 border-white shadow-xl flex items-center justify-center overflow-hidden relative cursor-pointer" onClick={() => profileFileInputRef.current?.click()}>
+                  {profilePhoto ? <img src={profilePhoto} className="w-full h-full object-cover" /> : <i className="fas fa-user text-3xl text-gray-200"></i>}
+                </div>
+                <input type="file" ref={profileFileInputRef} onChange={handleProfilePhotoChange} accept="image/*" className="hidden" />
+              </div>
+              <input type="text" value={profileName} onChange={e => setProfileName(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl font-black" />
+              <div className="flex gap-4 pt-4">
+                <button onClick={handleSaveProfile} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black">Salvar</button>
+                <button onClick={() => setIsEditingProfile(false)} className="flex-1 bg-gray-100 text-gray-500 py-4 rounded-2xl font-bold">Voltar</button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
