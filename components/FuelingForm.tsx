@@ -1,19 +1,31 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FuelType, FuelEntry } from '../types';
 
 interface FuelingFormProps {
   onSave: (entry: Omit<FuelEntry, 'id' | 'pricePerLiter' | 'efficiency'>) => void;
   onCancel: () => void;
+  initialData?: FuelEntry;
 }
 
-const FuelingForm: React.FC<FuelingFormProps> = ({ onSave, onCancel }) => {
+const FuelingForm: React.FC<FuelingFormProps> = ({ onSave, onCancel, initialData }) => {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [kmTotal, setKmTotal] = useState<string>('');
   const [kmPartial, setKmPartial] = useState<string>('');
   const [fuelType, setFuelType] = useState<FuelType>('Gasolina');
   const [value, setValue] = useState<string>('');
   const [liters, setLiters] = useState<string>('');
+
+  useEffect(() => {
+    if (initialData) {
+      setDate(initialData.date);
+      setKmTotal(initialData.kmTotal.toString());
+      setKmPartial(initialData.kmPartial.toString());
+      setFuelType(initialData.fuelType);
+      setValue(initialData.value.toString());
+      setLiters(initialData.liters.toString());
+    }
+  }, [initialData]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,8 +45,8 @@ const FuelingForm: React.FC<FuelingFormProps> = ({ onSave, onCancel }) => {
     <form onSubmit={handleSubmit} className="bg-white p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 max-h-[90vh] overflow-y-auto">
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h3 className="text-2xl font-black text-gray-900">Novo Abastecimento</h3>
-          <p className="text-gray-500 text-sm">Insira os dados do posto</p>
+          <h3 className="text-2xl font-black text-gray-900">{initialData ? 'Editar Registro' : 'Novo Abastecimento'}</h3>
+          <p className="text-gray-500 text-sm">{initialData ? 'Altere os dados do abastecimento' : 'Insira os dados do posto'}</p>
         </div>
         <button type="button" onClick={onCancel} className="w-10 h-10 flex items-center justify-center bg-gray-100 text-gray-400 hover:text-gray-600 rounded-full transition-colors">
           <i className="fas fa-times"></i>
@@ -156,7 +168,7 @@ const FuelingForm: React.FC<FuelingFormProps> = ({ onSave, onCancel }) => {
           type="submit"
           className="flex-[2] bg-gray-900 text-white py-5 rounded-3xl font-black text-lg shadow-xl hover:bg-black transition-all active:scale-[0.98]"
         >
-          Confirmar Registro
+          {initialData ? 'Salvar Alterações' : 'Confirmar Registro'}
         </button>
         <button
           type="button"
