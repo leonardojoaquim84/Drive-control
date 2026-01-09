@@ -1,25 +1,21 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Vehicle, FuelEntry, MaintenanceEntry, AppState, UserAccount, MaintenanceCategory } from './types';
+import { Vehicle, FuelEntry, MaintenanceEntry, AppState, MaintenanceCategory } from './types';
 import FuelingForm from './components/FuelingForm';
 import MaintenanceForm from './components/MaintenanceForm';
 import VehicleForm from './components/VehicleForm';
 import StatsDashboard from './components/StatsDashboard';
 import { getFuelInsights } from './services/geminiService';
 
-type ViewMode = 'home' | 'vehicle_detail' | 'auth' | 'profile';
+type ViewMode = 'home' | 'vehicle_detail';
 type VehicleTab = 'abastecimento' | 'manutencao';
 
-const App: React.FC = () => {
-  const [loggedUser, setLoggedUser] = useState<UserAccount | null>(null);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [authUsername, setAuthUsername] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
-  const [authError, setAuthError] = useState('');
+const STORAGE_KEY = 'drivecontrol_db_local';
 
+const App: React.FC = () => {
   const [state, setState] = useState<AppState>({ vehicles: [], activeVehicleId: null });
   const [isLoading, setIsLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<ViewMode>('auth');
+  const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [activeTab, setActiveTab] = useState<VehicleTab>('abastecimento');
 
   // UI STATE
@@ -28,74 +24,24 @@ const App: React.FC = () => {
   const [isAddingFuel, setIsAddingFuel] = useState(false);
   const [isAddingMaintenance, setIsAddingMaintenance] = useState(false);
   const [vehicleToDeleteId, setVehicleToDeleteId] = useState<string | null>(null);
+  const [fullScreenPhoto, setFullScreenPhoto] = useState<string | null>(null);
   
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isInsightLoading, setIsInsightLoading] = useState(false);
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-
-  const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const session = localStorage.getItem('drivecontrol_session');
-    if (session) {
-      const user = JSON.parse(session);
-      setLoggedUser(user);
-      loadUserData(user.username);
-      setViewMode('home');
+    const savedData = localStorage.getItem(STORAGE_KEY);
+    if (savedData) {
+      setState(JSON.parse(savedData));
     }
     setIsLoading(false);
   }, []);
 
   useEffect(() => {
-    if (loggedUser) {
-      localStorage.setItem(`drivecontrol_db_${loggedUser.username}`, JSON.stringify(state));
+    if (!isLoading) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     }
-  }, [state, loggedUser]);
-
-  const loadUserData = (username: string) => {
-    const savedData = localStorage.getItem(`drivecontrol_db_${username}`);
-    if (savedData) {
-      setState(JSON.parse(savedData));
-    } else {
-      setState({ vehicles: [], activeVehicleId: null });
-    }
-  };
-
-  const handleAuth = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-    const usersRaw = localStorage.getItem('drivecontrol_users');
-    const users: UserAccount[] = usersRaw ? JSON.parse(usersRaw) : [];
-
-    if (authMode === 'register') {
-      if (users.find(u => u.username.toLowerCase() === authUsername.toLowerCase())) {
-        setAuthError('Este nome de usuário já está em uso.');
-        return;
-      }
-      const newUser: UserAccount = { username: authUsername, password: authPassword };
-      users.push(newUser);
-      localStorage.setItem('drivecontrol_users', JSON.stringify(users));
-      setAuthMode('login');
-      setAuthError('Conta criada com sucesso! Faça seu login.');
-    } else {
-      const user = users.find(u => u.username.toLowerCase() === authUsername.toLowerCase() && u.password === authPassword);
-      if (user) {
-        setLoggedUser(user);
-        localStorage.setItem('drivecontrol_session', JSON.stringify(user));
-        loadUserData(user.username);
-        setViewMode('home');
-      } else {
-        setAuthError('Usuário ou senha incorretos.');
-      }
-    }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('drivecontrol_session');
-    setLoggedUser(null);
-    setViewMode('auth');
-    setIsUserMenuOpen(false);
-  };
+  }, [state, isLoading]);
 
   const activeVehicle = useMemo(() => 
     state.vehicles.find(v => v.id === state.activeVehicleId),
@@ -225,33 +171,6 @@ const App: React.FC = () => {
 
   if (isLoading) return null;
 
-  if (viewMode === 'auth') {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
-        <div className="bg-white p-10 rounded-[3rem] shadow-2xl w-full max-w-md border border-gray-100">
-          <div className="text-center mb-10">
-            <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center text-white text-4xl shadow-xl mx-auto mb-6">
-              <i className="fas fa-car-side"></i>
-            </div>
-            <h1 className="text-3xl font-black text-gray-900 tracking-tight">DriveControl Pro</h1>
-            <p className="text-gray-400 font-bold mt-2">{authMode === 'login' ? 'Entre na sua garagem digital' : 'Crie sua conta gratuita'}</p>
-          </div>
-          <form onSubmit={handleAuth} className="space-y-4">
-            <input type="text" placeholder="Usuário" required value={authUsername} onChange={e => setAuthUsername(e.target.value)} className="w-full p-5 bg-gray-50 border border-gray-100 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" />
-            <input type="password" placeholder="Senha" required value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="w-full p-5 bg-gray-50 border border-gray-100 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" />
-            {authError && <p className="text-red-500 text-xs font-black text-center">{authError}</p>}
-            <button type="submit" className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all">
-              {authMode === 'login' ? 'Acessar Painel' : 'Registrar'}
-            </button>
-          </form>
-          <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full mt-8 text-blue-600 font-black text-xs uppercase tracking-widest hover:underline">
-            {authMode === 'login' ? 'Não possui conta? Registre-se' : 'Já é cadastrado? Login'}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 pb-24">
       <header className="mb-10 flex items-center justify-between">
@@ -263,19 +182,6 @@ const App: React.FC = () => {
             <h1 className="text-2xl font-black text-gray-900 leading-tight">DriveControl <span className="text-blue-600">Pro</span></h1>
             <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">Controle de Frota</p>
           </div>
-        </div>
-        <div className="relative" ref={userMenuRef}>
-          <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center gap-3 p-1 bg-white border border-gray-100 rounded-full shadow-sm hover:shadow-md transition-all">
-            <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 font-black text-xs border border-blue-100 overflow-hidden">
-              {loggedUser?.photo ? <img src={loggedUser.photo} className="w-full h-full object-cover rounded-full" /> : getUserInitials(loggedUser?.username || '')}
-            </div>
-            <span className="font-bold text-sm text-gray-700 pr-3 hidden sm:inline">{loggedUser?.username}</span>
-          </button>
-          {isUserMenuOpen && (
-            <div className="absolute right-0 mt-3 w-56 bg-white rounded-3xl shadow-2xl border border-gray-100 z-50 overflow-hidden">
-              <button onClick={handleLogout} className="w-full text-left px-5 py-4 text-sm font-bold text-red-500 hover:bg-red-50 flex items-center gap-3"><i className="fas fa-sign-out-alt"></i> Sair da Conta</button>
-            </div>
-          )}
         </div>
       </header>
 
@@ -311,15 +217,15 @@ const App: React.FC = () => {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {state.vehicles.map(v => (
-                  <button key={v.id} onClick={() => { setState(s => ({...s, activeVehicleId: v.id})); setViewMode('vehicle_detail'); setActiveTab('abastecimento'); }} className="group bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-xl transition-all text-left flex items-center gap-5">
-                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-xl font-black overflow-hidden shadow-sm" style={{ backgroundColor: v.photo ? 'transparent' : v.color }}>
-                      {v.photo ? <img src={v.photo} className="w-full h-full object-cover" /> : getUserInitials(v.name)}
+                  <button key={v.id} onClick={() => { setState(s => ({...s, activeVehicleId: v.id})); setViewMode('vehicle_detail'); setActiveTab('abastecimento'); }} className="group bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-xl transition-all text-left flex items-center gap-5 overflow-hidden">
+                    <div className="w-20 h-20 rounded-2xl flex items-center justify-center text-white text-xl font-black overflow-hidden shadow-sm flex-shrink-0" style={{ backgroundColor: v.photo ? 'transparent' : v.color }}>
+                      {v.photo ? <img src={v.photo} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" /> : getUserInitials(v.name)}
                     </div>
                     <div className="flex-1 min-w-0">
                        <h4 className="text-lg font-black text-gray-900 truncate">{v.name}</h4>
                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{v.plate || 'SEM PLACA'}</p>
                     </div>
-                    <i className="fas fa-chevron-right text-gray-200 group-hover:text-blue-500 transition-colors"></i>
+                    <i className="fas fa-chevron-right text-gray-200 group-hover:text-blue-500 transition-colors pr-2"></i>
                   </button>
                 ))}
               </div>
@@ -340,15 +246,39 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Vehicle Header */}
-          <div className="bg-white rounded-t-[3rem] p-8 lg:p-12 pb-6 border border-gray-100 flex flex-col items-center text-center relative overflow-hidden">
-            <div className="absolute top-0 inset-x-0 h-24 bg-gray-50/50"></div>
-            <div className="w-32 h-32 rounded-[2.5rem] border-4 border-white flex items-center justify-center text-white text-4xl font-black mb-6 shadow-2xl relative z-10 overflow-hidden" style={{ backgroundColor: activeVehicle.photo ? 'transparent' : activeVehicle.color }}>
-              {activeVehicle.photo ? <img src={activeVehicle.photo} className="w-full h-full object-cover" /> : getUserInitials(activeVehicle.name)}
+          {/* New Immersive Vehicle Header */}
+          <div className="relative bg-white rounded-[3rem] border border-gray-100 overflow-hidden shadow-sm">
+            {activeVehicle.photo && (
+              <div className="absolute inset-0 z-0">
+                <img src={activeVehicle.photo} className="w-full h-full object-cover blur-2xl opacity-10 scale-110" />
+                <div className="absolute inset-0 bg-gradient-to-b from-white/80 to-white"></div>
+              </div>
+            )}
+            
+            <div className="relative z-10 p-8 lg:p-12 flex flex-col items-center text-center">
+              <div 
+                onClick={() => activeVehicle.photo && setFullScreenPhoto(activeVehicle.photo)}
+                className={`w-48 h-48 rounded-[3rem] border-8 border-white flex items-center justify-center text-white text-6xl font-black mb-6 shadow-2xl relative overflow-hidden cursor-pointer group transition-all hover:scale-105 active:scale-95`} 
+                style={{ backgroundColor: activeVehicle.photo ? 'transparent' : activeVehicle.color }}
+              >
+                {activeVehicle.photo ? (
+                  <>
+                    <img src={activeVehicle.photo} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <i className="fas fa-search-plus text-white text-3xl"></i>
+                    </div>
+                  </>
+                ) : getUserInitials(activeVehicle.name)}
+              </div>
+              <h2 className="text-4xl font-black text-gray-900 mb-1">{activeVehicle.name}</h2>
+              <p className="text-gray-400 font-bold mb-4">{activeVehicle.model || 'Modelo não informado'}</p>
+              <div className="bg-white/80 backdrop-blur-sm text-gray-600 px-8 py-3 rounded-2xl text-[18px] font-black uppercase tracking-[0.2em] font-mono mb-2 shadow-sm border border-gray-100">
+                {activeVehicle.plate || 'SEM PLACA'}
+              </div>
+              {activeVehicle.photo && (
+                <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mt-2 animate-pulse">Toque na foto para ampliar</p>
+              )}
             </div>
-            <h2 className="text-3xl font-black text-gray-900 mb-1 z-10">{activeVehicle.name}</h2>
-            <p className="text-gray-400 font-bold mb-4 z-10">{activeVehicle.model || 'Sem modelo definido'}</p>
-            <div className="bg-gray-100 text-gray-500 px-6 py-2 rounded-full text-[14px] font-black uppercase tracking-[0.2em] font-mono mb-6 z-10 border border-gray-200">{activeVehicle.plate || 'SEM PLACA'}</div>
           </div>
 
           {/* TAB NAVIGATION */}
@@ -517,6 +447,23 @@ const App: React.FC = () => {
               <button onClick={() => setVehicleToDeleteId(null)} className="w-full bg-gray-100 text-gray-500 py-5 rounded-2xl font-black">Cancelar</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Full Screen Photo View Modal */}
+      {fullScreenPhoto && (
+        <div 
+          className="fixed inset-0 bg-black/95 z-[200] flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+          onClick={() => setFullScreenPhoto(null)}
+        >
+          <button className="absolute top-10 right-10 text-white text-4xl hover:scale-110 transition-transform">
+            <i className="fas fa-times"></i>
+          </button>
+          <img 
+            src={fullScreenPhoto} 
+            className="max-w-full max-h-full rounded-2xl shadow-2xl object-contain animate-in zoom-in-95 duration-300" 
+            alt="Vehicle Full Screen"
+          />
         </div>
       )}
     </div>
